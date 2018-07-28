@@ -144,15 +144,16 @@ int parse_pkey_types(PSRT *g, char *optarg){
 	pkey_t *pkey;
 	char *ptr, ch;
 	u4i i;
-	int state, len;
+	int state, len, inc;
 	ptr = optarg;
 	state = 0;
 	len = 0;
+	inc = 0;
 	{
 		pkey = next_ref_pkeyv(g->pkeys);
 		pkey->flag   = 0;
 		pkey->field  = 0;
-		pkey->beg    = 1;
+		pkey->beg    = -1;
 		pkey->end    = -1;
 		pkey->hash   = init_cuhash(1);
 	}
@@ -162,7 +163,7 @@ int parse_pkey_types(PSRT *g, char *optarg){
 				pkey = next_ref_pkeyv(g->pkeys);
 				pkey->flag   = 0;
 				pkey->field  = 0;
-				pkey->beg    = 1;
+				pkey->beg    = -1;
 				pkey->end    = -1;
 				pkey->hash   = init_cuhash(1);
 			}
@@ -192,6 +193,7 @@ int parse_pkey_types(PSRT *g, char *optarg){
 					}
 					break;
 				case 1:
+					if(pkey->beg == -1) pkey->beg = 0;
 					if(ch >= '0' && ch <= '9'){
 						pkey->beg = pkey->beg * 10 + (ch - '0');
 					} else if(ch == '-'){
@@ -204,6 +206,7 @@ int parse_pkey_types(PSRT *g, char *optarg){
 					}
 					break;
 				case 2:
+					if(pkey->end == -1) pkey->end = 0;
 					if(ch >= '0' && ch <= '9'){
 						pkey->end = pkey->end * 10 + (ch - '0');
 					} else if(ch == ']'){
@@ -238,7 +241,8 @@ int parse_pkey_types(PSRT *g, char *optarg){
 	for(i=0;i<g->pkeys->size;i++){
 		pkey = ref_pkeyv(g->pkeys, i);
 		if(pkey->field) pkey->field --;
-		pkey->beg --;
+		if(pkey->beg <= 0) pkey->beg = 0;
+		else pkey->beg --;
 		g->brks[i] = init_colbrkv(1024);
 	}
 	return 0;
@@ -418,7 +422,7 @@ void parse_data(PSRT *g, int nfile, char **filenames){
 
 static u1i is_num_chars[256];
 
-int cmpgt_col(PSRT *g, u8i a, u8i b){
+int cmp_col(PSRT *g, u8i a, u8i b){
 	pkey_t *pkey;
 	col_t *ka, *kb;
 	col_brk_t *ca, *cb;
@@ -452,20 +456,18 @@ int cmpgt_col(PSRT *g, u8i a, u8i b){
 			if(tb) sb[cb->len] = tb;
 			if(cmp == 0) continue;
 			if(pkey->flag & (1 << TYPE_REV_BIT)){
-				if(cmp > 0) return 0;
-				else return 1;
+				return - cmp;
 			} else {
-				if(cmp > 0) return 1;
-				else return 0;
+				return cmp;
 			}
 		} else if(pkey->flag & (1 << TYPE_ENUM_BIT)){
 			if(ca->len == cb->len) continue;
 			if(pkey->flag & (1 << TYPE_REV_BIT)){
-				if(ca->len > cb->len) return 0;
+				if(ca->len > cb->len) return -1;
 				else return 1;
 			} else {
 				if(ca->len > ca->len) return 1;
-				else return 0;
+				else return -1;
 			}
 		} else {
 			ka = ref_colv(g->cols, a);
@@ -481,11 +483,9 @@ int cmpgt_col(PSRT *g, u8i a, u8i b){
 				if(cmp == 0) continue;
 			}
 			if(pkey->flag & (1 << TYPE_REV_BIT)){
-				if(cmp > 0) return 0;
-				else return 1;
+				return - cmp;
 			} else {
-				if(cmp > 0) return 1;
-				else return 0;
+				return cmp;
 			}
 		}
 	}
@@ -500,17 +500,20 @@ void psort_data(PSRT *g, int ncpu){
 	is_num_chars[(int)','] = 1;
 	is_num_chars[(int)'-'] = 1;
 	if(ncpu > 1){
-		psort_array(g->srts->buffer, g->srts->size, u8i, ncpu, cmpgt_col(g, a, b));
+		psort_array(g->srts->buffer, g->srts->size, u8i, ncpu, cmp_col(g, a, b) > 0);
 	} else {
-		sort_array(g->srts->buffer, g->srts->size, u8i, cmpgt_col(g, a, b));
+		sort_array(g->srts->buffer, g->srts->size, u8i, cmp_col(g, a, b) > 0);
 	}
 }
 
-void output_data(PSRT *g, FILE *out){
+void output_data(PSRT *g, int uniq, FILE *out){
 	u8i i;
 	col_t *col;
 	for(i=0;i<g->srts->size;i++){
 		col = ref_colv(g->cols, g->srts->buffer[i]);
+		if(uniq == 1 && i){
+			if(cmp_col(g, g->srts->buffer[i - 1], g->srts->buffer[i]) == 0) continue;
+		}
 		fwrite(g->text->buffer + col->off, 1, col->len, out);
 	}
 	fflush(out);
@@ -525,11 +528,12 @@ int usage(){
 	"Options:\n"
 	" -h          display this document\n"
 	" -t <int>    number of threads, 0: all cores, [0]\n"
-	" -l <string> specify line brokers, you can define more than one characters, [\\n]\n"
+	" -l <string> specify line brokers, +, \\n]\n"
 	" -M <int>    treat <-M> line as one record, [1]\n"
-	" -S <char>   treat line start with <-S> as new record, []\n"
-	" -s <string> specify field separators, you can define more than one characters, [\\t ]\n"
-	" -k <string> specify fileds to be sorted, eg.\n"
+	" -S <string> treat line start with a character in <-S> as new record, +, []\n"
+	" -s <string> specify field separators, +, [\\t ]\n"
+	" -u          output the first record for repeats\n"
+	" -k <string> specify fields to be sorted, eg.\n"
 	"             rn10[2-6]: reverse sort 2-6th (include 6) of column 10, treat it as number\n"
 	"             n11: sort column 11, treat it as number\n"
 	"             f2[6-]: sort 6th-end of column 2, treat it as string, ignore case\n"
@@ -541,6 +545,8 @@ int usage(){
 	"             \\d+: field\n"
 	"             [a-b]: substr\n"
 	"             {a b c}: enum\n"
+	" -m <int>    merge mode, 0: sort and merge into rows; 1: merge into rows (append row); 2: merge into columns (append col); [0]\n"
+	"             when -m 2, "
 	);
 	return 1;
 }
@@ -549,13 +555,14 @@ int main(int argc, char **argv){
 	PSRT *g;
 	String *param;
 	char *fstdins[1];
-	int ncpu, nl, ns;
+	int ncpu, nl, ns, uniq;
 	int c, pc;
 	g = init_psrt();
 	param = init_string(32);
 	ncpu = 0;
 	nl = ns = 0;
-	while((c = getopt(argc, argv, "ht:l:M:S:s:k:")) != -1){
+	uniq = 0;
+	while((c = getopt(argc, argv, "hut:l:M:S:s:k:")) != -1){
 		switch(c){
 			case 't': ncpu = atoi(optarg); break;
 			case 'l': beg_parse_char(); while((pc = parse_char(optarg, strlen(optarg))) != -1){ nl ++; g->delimiters[pc] = 2; } break;
@@ -563,6 +570,7 @@ int main(int argc, char **argv){
 			case 'S': beg_parse_char(); while((pc = parse_char(optarg, strlen(optarg))) != -1){ g->rec_head ++; g->delimiters[pc] = 3; } break;
 			case 'M': g->nline = atoi(optarg); break;
 			case 'k': append_string(param, optarg, strlen(optarg)); break;
+			case 'u': uniq = 1; break;
 			default: return usage();
 		}
 	}
@@ -585,7 +593,7 @@ int main(int argc, char **argv){
 		parse_data(g, argc - optind, argv + optind);
 	}
 	psort_data(g, ncpu);
-	output_data(g, stdout);
+	output_data(g, uniq, stdout);
 	free_psrt(g);
 	return 0;
 }
