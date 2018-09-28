@@ -32,8 +32,10 @@
 #define TYPE_CASE_BIT	2
 #define TYPE_REV_BIT	3
 
+//#define LONG_ROW
+
 typedef struct {
-	u8i off:48, len:16;
+	u8i off:40, len:24;
 } col_t;
 define_list(colv, col_t);
 
@@ -46,7 +48,11 @@ typedef struct {
 define_list(pkeyv, pkey_t);
 
 typedef struct {
+#ifdef LONG_ROW
+	u4i off, len;
+#else
 	u2i off, len;
+#endif
 } col_brk_t;
 define_list(colbrkv, col_brk_t);
 

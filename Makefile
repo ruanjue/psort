@@ -2,11 +2,12 @@
 #DATE=2017-11-18
 
 CC := gcc
+UFLAGS :=
 
 ifeq (1, ${DEBUG})
-CFLAGS=-g3 -W -Wall -Wno-unused-but-set-variable -O0 -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -mpopcnt -msse4.2
+CFLAGS=-g3 -W -Wall -Wno-unused-but-set-variable -O0 -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -mpopcnt -msse4.2 $(UFLAGS)
 else
-CFLAGS=-g3 -W -Wall -Wno-unused-but-set-variable -O4 -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -mpopcnt -msse4.2
+CFLAGS=-g3 -W -Wall -Wno-unused-but-set-variable -O4 -D_FILE_OFFSET_BITS=64 -D_GNU_SOURCE -mpopcnt -msse4.2 $(UFLAGS)
 endif
 
 INSTALLDIR=/usr/local/bin
